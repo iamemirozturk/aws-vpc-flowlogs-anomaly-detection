@@ -146,7 +146,7 @@ This project implements a **centralized, multi-account network traffic visibilit
 ### 1 — Clone & configure
 
 ```bash
-git clone https://github.com/your-handle/aws-vpc-flowlogs-anomaly-detection.git
+git clone https://github.com/iamemirozturk/aws-vpc-flowlogs-anomaly-detection.git
 cd aws-vpc-flowlogs-anomaly-detection
 cp examples/multi-account/terraform.tfvars.example terraform.tfvars
 ```
