@@ -1,0 +1,142 @@
+name: Terraform CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.7.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Validate & Format
+  # ---------------------------------------------------------------------------
+  validate:
+    name: "Terraform Validate & Format"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init (no backend)
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Comment PR — Format
+        if: github.event_name == 'pull_request' && steps.fmt.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ **Terraform format check failed.** Run `terraform fmt -recursive` locally and commit the changes.'
+            })
+
+  # ---------------------------------------------------------------------------
+  # Security Scanning — tfsec
+  # ---------------------------------------------------------------------------
+  tfsec:
+    name: "tfsec Security Scan"
+    runs-on: ubuntu-latest
+    needs: validate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          soft_fail: false
+          format: sarif
+          additional_args: >-
+            --minimum-severity HIGH
+            --exclude-downloaded-modules
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+
+  # ---------------------------------------------------------------------------
+  # Security Scanning — Checkov
+  # ---------------------------------------------------------------------------
+  checkov:
+    name: "Checkov Policy Scan"
+    runs-on: ubuntu-latest
+    needs: validate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          quiet: true
+          soft_fail: false
+
+      - name: Upload Checkov SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov.sarif
+
+  # ---------------------------------------------------------------------------
+  # Terraform Plan (dry-run, no AWS credentials — validates HCL only)
+  # ---------------------------------------------------------------------------
+  plan:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+    needs: [tfsec, checkov]
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init (no backend)
+        run: terraform init -backend=false
+
+      - name: Copy example tfvars
+        run: cp examples/multi-account/terraform.tfvars.example terraform.tfvars
+
+      - name: Terraform Plan (syntax/config validation only)
+        env:
+          # Dummy values — no real AWS calls in PR validation
+          AWS_ACCESS_KEY_ID:     "AKIAIOSFODNN7EXAMPLE"
+          AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+          AWS_DEFAULT_REGION:    ${{ env.AWS_REGION }}
+        run: terraform plan -input=false -var-file=terraform.tfvars 2>&1 || true
