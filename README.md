@@ -216,8 +216,8 @@ SELECT
   SUM(bytes) AS total_bytes,
   SUM(bytes) / 1073741824.0 AS total_gb
 FROM vpc_flow_logs.flow_logs
-WHERE year  = '2024'
-  AND month = '01'
+WHERE year  = '2026'
+  AND month = '05'
   AND day   = '15'
   AND action = 'ACCEPT'
 GROUP BY instance_id, srcaddr, dstaddr
@@ -235,8 +235,8 @@ SELECT
   dstaddr,
   SUM(bytes) AS total_bytes
 FROM vpc_flow_logs.flow_logs
-WHERE year  = '2024'
-  AND month = '01'
+WHERE year  = '2026'
+  AND month = '05'
   AND dstaddr NOT LIKE '10.%'
   AND dstaddr NOT LIKE '172.16.%'
   AND dstaddr NOT LIKE '192.168.%'
@@ -264,7 +264,7 @@ When a threshold is exceeded, an SNS notification is sent with the following pay
   "total_gb": 70.0,
   "threshold_gb": 50.0,
   "detection_window": "last_1_hour",
-  "timestamp": "2024-01-15T14:30:00Z",
+  "timestamp": "2026-05-15T14:30:00Z",
   "athena_query_id": "abc12345-def6-7890-ghij-klmnopqrstuv"
 }
 ```
