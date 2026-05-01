@@ -329,6 +329,5 @@ This project is licensed under the MIT License — see [LICENSE](LICENSE) for de
 
 ## 👤 Author
 
-Built by an [AWS Ambassador](https://aws.amazon.com/partners/ambassadors/) as a reference implementation for cloud security practitioners.
+This Repo and project have been prepared by Emir Ozturk.
 
-> ⭐ If you find this useful, please star the repo — it helps other practitioners discover it!
