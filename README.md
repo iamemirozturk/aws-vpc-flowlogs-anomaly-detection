@@ -8,7 +8,7 @@
   <a href="https://www.terraform.io/"><img src="https://img.shields.io/badge/Terraform-1.6+-7B42BC?style=flat&logo=terraform" /></a>
   <a href="https://aws.amazon.com/"><img src="https://img.shields.io/badge/AWS-Multi--Account-FF9900?style=flat&logo=amazon-aws" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" /></a>
-  <a href="https://github.com/your-handle/aws-vpc-flowlogs-anomaly-detection/actions"><img src="https://img.shields.io/badge/CI-Terraform%20Validate-blue?logo=github-actions" /></a>
+  <a href="https://github.com/iamemirozturk/aws-vpc-flowlogs-anomaly-detection/actions"><img src="https://img.shields.io/badge/CI-Terraform%20Validate-blue?logo=github-actions" /></a>
   <img src="https://img.shields.io/badge/Security-tfsec%20%7C%20Checkov-critical" />
   <img src="https://img.shields.io/badge/CIS-AWS%20Foundations%20v1.5-blue" />
 </p>
