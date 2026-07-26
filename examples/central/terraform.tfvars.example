@@ -1,0 +1,37 @@
+central_account_id = "111122223333"
+central_region     = "us-east-1"
+log_bucket_name    = "acme-central-vpc-flowlogs"
+
+log_sources = [
+  {
+    account_id = "444455556666"
+    regions    = ["us-east-1", "eu-west-1"]
+  },
+  {
+    account_id = "777788889999"
+    regions    = ["us-east-1"]
+  },
+]
+
+exfil_threshold_bytes      = 53687091200
+detection_window_minutes   = 60
+data_delay_minutes         = 15
+detection_schedule         = "rate(1 hour)"
+alert_email                = "security-team@example.com"
+excluded_destination_cidrs = ["203.0.113.0/24"]
+
+enable_object_lock         = false
+object_lock_mode           = "GOVERNANCE"
+object_lock_retention_days = 365
+
+glacier_transition_days      = 90
+deep_archive_transition_days = 180
+log_expiration_days           = null
+
+environment  = "prod"
+project_name = "vpc-flowlogs-anomaly-detection"
+
+tags = {
+  CostCenter = "security"
+  Owner      = "cloud-security-team"
+}

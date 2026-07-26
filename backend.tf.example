@@ -1,0 +1,9 @@
+terraform {
+  backend "s3" {
+    bucket       = "REPLACE-central-terraform-state"
+    key          = "vpc-flowlogs/central/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}

@@ -1,9 +1,5 @@
-# ---------------------------------------------------------------------------
-# Root Variables
-# ---------------------------------------------------------------------------
-
 variable "central_account_id" {
-  description = "AWS Account ID of the central Security/Logging account."
+  description = "Twelve-digit ID of the Security/Logging account where central resources are deployed."
   type        = string
 
   validation {
@@ -13,123 +9,237 @@ variable "central_account_id" {
 }
 
 variable "central_region" {
-  description = "AWS region for the central logging account resources."
+  description = "AWS Region for the central logging and detection resources."
   type        = string
   default     = "us-east-1"
-}
-
-variable "log_bucket_name" {
-  description = "Name of the central S3 bucket that receives VPC Flow Logs from all spoke accounts."
-  type        = string
 
   validation {
-    condition     = can(regex("^[a-z0-9][a-z0-9\\-]{2,61}[a-z0-9]$", var.log_bucket_name))
-    error_message = "log_bucket_name must be a valid S3 bucket name (lowercase, 3-63 chars)."
+    condition     = can(regex("^[a-z]{2}(-gov)?-[a-z]+-[0-9]$", var.central_region))
+    error_message = "central_region must be a valid AWS Region identifier."
   }
 }
 
-variable "spoke_accounts" {
-  description = <<-EOT
-    List of spoke accounts to onboard.
-    Each entry specifies the account ID and the list of VPC IDs to enable Flow Logs on.
-    The module will assume the deployment role in each account.
-  EOT
-  type = list(object({
-    account_id = string
-    vpc_ids    = list(string)
-  }))
-  default = []
+variable "log_bucket_name" {
+  description = "Globally unique name for the central VPC Flow Logs bucket. Limited to 48 characters so derived bucket names remain valid."
+  type        = string
 
   validation {
-    condition = alltrue([
-      for a in var.spoke_accounts : can(regex("^[0-9]{12}$", a.account_id))
-    ])
-    error_message = "Each spoke account_id must be a 12-digit AWS account ID."
+    condition = (
+      length(var.log_bucket_name) >= 3 &&
+      length(var.log_bucket_name) <= 48 &&
+      can(regex("^[a-z0-9][a-z0-9.-]*[a-z0-9]$", var.log_bucket_name)) &&
+      !can(regex("\\.\\.", var.log_bucket_name)) &&
+      !can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$", var.log_bucket_name))
+    )
+    error_message = "log_bucket_name must be a valid 3-48 character S3 bucket name."
+  }
+}
+
+variable "log_sources" {
+  description = "Spoke account and Region combinations permitted to deliver VPC Flow Logs and exposed through partition projection."
+  type = list(object({
+    account_id = string
+    regions    = set(string)
+  }))
+
+  validation {
+    condition = (
+      length(var.log_sources) > 0 &&
+      alltrue([
+        for source in var.log_sources :
+        can(regex("^[0-9]{12}$", source.account_id)) &&
+        length(source.regions) > 0 &&
+        alltrue([
+          for region in source.regions :
+          can(regex("^[a-z]{2}(-gov)?-[a-z]+-[0-9]$", region))
+        ])
+      ])
+    )
+    error_message = "log_sources must contain at least one valid account ID with at least one valid AWS Region."
   }
 }
 
 variable "exfil_threshold_bytes" {
-  description = "Bytes transferred in a detection window above which an alert is triggered. Default: 50 GB."
+  description = "Outbound bytes per source entity in one detection window that triggers an alert."
   type        = number
-  default     = 53687091200 # 50 * 1024^3
+  default     = 53687091200
 
   validation {
-    condition     = var.exfil_threshold_bytes > 0
+    condition     = var.exfil_threshold_bytes > 0 && floor(var.exfil_threshold_bytes) == var.exfil_threshold_bytes
     error_message = "exfil_threshold_bytes must be a positive integer."
   }
 }
 
 variable "alert_email" {
-  description = "Email address to receive SNS anomaly detection alerts."
+  description = "Optional email endpoint for SNS alerts. The subscription remains pending until the recipient confirms it."
   type        = string
+  default     = null
+  nullable    = true
 
   validation {
-    condition     = can(regex("^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$", var.alert_email))
-    error_message = "alert_email must be a valid email address."
+    condition = (
+      var.alert_email == null ||
+      can(regex("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", var.alert_email))
+    )
+    error_message = "alert_email must be null or a valid email address."
   }
 }
 
 variable "detection_schedule" {
-  description = "EventBridge schedule expression for the Lambda detector. Default: every hour."
+  description = "EventBridge schedule expression for the detector."
   type        = string
   default     = "rate(1 hour)"
+
+  validation {
+    condition     = can(regex("^(rate|cron)\\(.+\\)$", var.detection_schedule))
+    error_message = "detection_schedule must be an EventBridge rate(...) or cron(...) expression."
+  }
 }
 
-variable "log_retention_days" {
-  description = "S3 lifecycle rule: move logs to Glacier after this many days."
+variable "detection_window_minutes" {
+  description = "Length of each rolling detector query window."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.detection_window_minutes >= 5 && var.detection_window_minutes <= 1440
+    error_message = "detection_window_minutes must be between 5 and 1440."
+  }
+}
+
+variable "data_delay_minutes" {
+  description = "Delay applied to the query window to allow Flow Logs delivery to complete."
+  type        = number
+  default     = 15
+
+  validation {
+    condition     = var.data_delay_minutes >= 0 && var.data_delay_minutes <= 180
+    error_message = "data_delay_minutes must be between 0 and 180."
+  }
+}
+
+variable "excluded_destination_cidrs" {
+  description = "Additional destination CIDRs excluded from exfiltration alerts."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for cidr in var.excluded_destination_cidrs : can(cidrhost(cidr, 0))])
+    error_message = "Every excluded_destination_cidrs entry must be valid CIDR notation."
+  }
+}
+
+variable "glacier_transition_days" {
+  description = "Days before current Flow Log objects transition to Glacier Flexible Retrieval."
   type        = number
   default     = 90
+
+  validation {
+    condition     = var.glacier_transition_days >= 30
+    error_message = "glacier_transition_days must be at least 30."
+  }
 }
 
-variable "athena_results_bucket" {
-  description = "S3 bucket for Athena query results. If empty, a bucket is created automatically."
+variable "deep_archive_transition_days" {
+  description = "Days before current Flow Log objects transition to Glacier Deep Archive."
+  type        = number
+  default     = 180
+
+  validation {
+    condition     = var.deep_archive_transition_days >= 90
+    error_message = "deep_archive_transition_days must be at least 90."
+  }
+}
+
+variable "log_expiration_days" {
+  description = "Optional number of days before current Flow Log objects expire. Null retains them indefinitely."
+  type        = number
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.log_expiration_days == null || var.log_expiration_days >= 1
+    error_message = "log_expiration_days must be null or a positive number."
+  }
+}
+
+variable "athena_results_bucket_name" {
+  description = "Optional globally unique Athena results bucket name. A name derived from log_bucket_name is used when null."
   type        = string
-  default     = ""
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.athena_results_bucket_name == null ||
+      (
+        length(var.athena_results_bucket_name) >= 3 &&
+        length(var.athena_results_bucket_name) <= 63 &&
+        can(regex("^[a-z0-9][a-z0-9.-]*[a-z0-9]$", var.athena_results_bucket_name))
+      )
+    )
+    error_message = "athena_results_bucket_name must be null or a valid S3 bucket name."
+  }
 }
 
 variable "enable_object_lock" {
-  description = "Enable S3 Object Lock (COMPLIANCE mode) for log immutability. Cannot be disabled after creation."
+  description = "Enable S3 Object Lock at bucket creation. This setting cannot be disabled later."
   type        = bool
-  default     = true
+  default     = false
+}
+
+variable "object_lock_mode" {
+  description = "Default Object Lock retention mode when Object Lock is enabled."
+  type        = string
+  default     = "GOVERNANCE"
+
+  validation {
+    condition     = contains(["GOVERNANCE", "COMPLIANCE"], var.object_lock_mode)
+    error_message = "object_lock_mode must be GOVERNANCE or COMPLIANCE."
+  }
 }
 
 variable "object_lock_retention_days" {
-  description = "Number of days for S3 Object Lock COMPLIANCE retention."
+  description = "Default Object Lock retention in days."
   type        = number
   default     = 365
-}
-
-variable "glue_crawler_schedule" {
-  description = "Cron schedule for the Glue Crawler. Default: daily at 02:00 UTC."
-  type        = string
-  default     = "cron(0 2 * * ? *)"
-}
-
-variable "flow_log_traffic_type" {
-  description = "Type of traffic to capture in VPC Flow Logs. Options: ACCEPT, REJECT, ALL."
-  type        = string
-  default     = "ALL"
 
   validation {
-    condition     = contains(["ACCEPT", "REJECT", "ALL"], var.flow_log_traffic_type)
-    error_message = "flow_log_traffic_type must be one of: ACCEPT, REJECT, ALL."
+    condition     = var.object_lock_retention_days >= 1
+    error_message = "object_lock_retention_days must be positive."
+  }
+}
+
+variable "athena_query_scan_cutoff_bytes" {
+  description = "Maximum bytes that Athena permits a single workgroup query to scan."
+  type        = number
+  default     = 10737418240
+
+  validation {
+    condition     = var.athena_query_scan_cutoff_bytes >= 10485760
+    error_message = "athena_query_scan_cutoff_bytes must be at least 10 MiB."
   }
 }
 
 variable "environment" {
-  description = "Deployment environment (e.g., prod, staging)."
+  description = "Short environment name used in resource names."
   type        = string
   default     = "prod"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{1,15}$", var.environment))
+    error_message = "environment must be 2-16 lowercase alphanumeric or hyphen characters and start with a letter."
+  }
 }
 
 variable "project_name" {
-  description = "Name tag applied to all resources."
+  description = "Project tag applied to all resources."
   type        = string
   default     = "vpc-flowlogs-anomaly-detection"
 }
 
 variable "tags" {
-  description = "Additional tags to apply to all resources."
+  description = "Additional tags applied to resources."
   type        = map(string)
   default     = {}
 }

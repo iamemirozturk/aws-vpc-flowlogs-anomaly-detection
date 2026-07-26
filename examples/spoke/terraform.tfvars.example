@@ -1,0 +1,19 @@
+spoke_account_id   = "444455556666"
+region             = "us-east-1"
+deployment_role_arn = "arn:aws:iam::444455556666:role/TerraformDeploymentRole"
+
+vpc_ids = [
+  "vpc-0aaa1111bbbb2222c",
+  "vpc-0ddd3333eeee4444f",
+]
+
+central_log_bucket_arn = "arn:aws:s3:::acme-central-vpc-flowlogs"
+
+flow_log_traffic_type    = "ALL"
+max_aggregation_interval = 60
+environment              = "prod"
+
+tags = {
+  CostCenter = "security"
+  Owner      = "cloud-security-team"
+}
