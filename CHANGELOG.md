@@ -28,6 +28,8 @@ All notable changes are documented here. The project follows
   Glacier Flexible Retrieval minimum duration before Deep Archive.
 - Kept security scans independent from the quality job and corrected Python
   dependency caching.
+- Replaced the stale tfsec wrapper with a pinned, checksum-verified CLI so scan
+  failures and SARIF evidence cannot silently disappear.
 
 ### Removed
 

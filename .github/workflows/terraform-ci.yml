@@ -89,16 +89,27 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Install tfsec
+        env:
+          TFSEC_ARCHIVE: tfsec_1.28.14_linux_amd64.tar.gz
+          TFSEC_SHA256: 329ae7f67f2f1813ebe08de498719ea7003c75d3ca24bb0b038369062508008e
+        run: |
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "${TFSEC_ARCHIVE}" \
+            "https://github.com/aquasecurity/tfsec/releases/download/v1.28.14/${TFSEC_ARCHIVE}"
+          echo "${TFSEC_SHA256}  ${TFSEC_ARCHIVE}" | sha256sum --check
+          tar -xzf "${TFSEC_ARCHIVE}" tfsec
+
       - name: Scan Terraform
-        uses: aquasecurity/tfsec-action@a73ebc46fba54691e25cbe901656e7b205fb9bf2 # v1.0.0
-        with:
-          version: v1.28.14
-          soft_fail: false
-          format: sarif
-          additional_args: >-
-            --minimum-severity HIGH
-            --exclude-downloaded-modules
-            --out results.sarif
+        run: |
+          ./tfsec --version
+          ./tfsec \
+            --minimum-severity HIGH \
+            --exclude-downloaded-modules \
+            --format sarif \
+            --out results.sarif \
+            .
+          test -s results.sarif
 
       - name: Upload tfsec SARIF
         if: always() && hashFiles('results.sarif') != ''
