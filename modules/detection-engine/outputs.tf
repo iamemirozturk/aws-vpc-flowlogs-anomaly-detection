@@ -14,7 +14,7 @@ output "lambda_function_arn" {
 }
 
 output "dlq_url" {
-  description = "EventBridge target dead-letter queue URL."
+  description = "Dead-letter queue URL for failed detector invocations and EventBridge deliveries."
   value       = aws_sqs_queue.detector_dlq.url
 }
 
@@ -26,4 +26,14 @@ output "detection_state_table_name" {
 output "alerts_kms_key_arn" {
   description = "KMS key protecting alerting and detector state."
   value       = aws_kms_key.alerts.arn
+}
+
+output "schedule_expression" {
+  description = "Effective EventBridge detector schedule."
+  value       = aws_cloudwatch_event_rule.detector_schedule.schedule_expression
+}
+
+output "maximum_retry_attempts" {
+  description = "Configured Lambda asynchronous retry count."
+  value       = aws_lambda_function_event_invoke_config.detector.maximum_retry_attempts
 }

@@ -9,8 +9,8 @@ All notable changes are documented here. The project follows
 
 - Separate spoke deployment root and state boundary.
 - Explicit partition-projected Glue table for enriched Parquet Flow Logs.
-- Exact rolling-window detector with delayed ingestion, IPv4/IPv6 exclusions,
-  aggregated alerts, DynamoDB idempotency, EventBridge DLQ, and alarms.
+- Delayed record-end window detector with IPv4/IPv6 exclusions, aggregated
+  alerts, DynamoDB idempotency, a shared failure DLQ, and alarms.
 - Unit tests, Flake8, TFLint, dependency updates, and hardened CI.
 - Security policy, issue templates, pull-request checklist, and operational
   documentation.
@@ -21,6 +21,15 @@ All notable changes are documented here. The project follows
   resource-scoped Lambda permissions.
 - Made Object Lock opt-in and documented its irreversible behavior.
 - Replaced mutable CI scanner references and removed dummy AWS credentials.
+- Coupled the detector schedule to its window, enabled two handler retries, and
+  fingerprinted retry state with the detector configuration.
+- Assigned Flow Log records to windows by end timestamp and corrected GiB labels.
+- Made small-object archive transition behavior explicit and enforced the
+  Glacier Flexible Retrieval minimum duration before Deep Archive.
+- Kept security scans independent from the quality job and corrected Python
+  dependency caching.
+- Replaced the stale tfsec wrapper with a pinned, checksum-verified CLI so scan
+  failures and SARIF evidence cannot silently disappear.
 
 ### Removed
 

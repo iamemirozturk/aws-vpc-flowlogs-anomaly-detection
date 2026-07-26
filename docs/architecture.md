@@ -23,8 +23,9 @@ workload telemetry also have different credentials, owners, and lifecycles.
    month, day, and hour.
 3. An explicit Glue table describes the schema. Athena partition projection
    maps predicates to prefixes without a crawler.
-4. EventBridge invokes Lambda. Lambda derives an exact delayed window from the
-   event timestamp and submits a partition-pruned Athena query.
+4. EventBridge invokes Lambda at the same interval as the detection window.
+   Lambda derives a delayed half-open record-end window from the event timestamp
+   and submits a partition-pruned Athena query.
 5. Lambda publishes one bounded SNS notification when sources exceed the
    threshold, then records the completed window in DynamoDB.
 
@@ -41,16 +42,20 @@ packet address, AWS service, direction, and traffic path context. Packet
 addresses are preferred because intermediate network interfaces can change
 `srcaddr` and `dstaddr`.
 
-The half-open analytic interval is:
+The half-open record-assignment interval is:
 
 ```text
 [EventBridge time - delay - window, EventBridge time - delay)
 ```
 
-The query keeps accepted egress with `log_status = OK`, removes non-public
-destinations, aggregates bytes by destination, then aggregates every destination
-for each account/instance/source. This closes the original bug where traffic
-split across many destinations could remain under each per-destination threshold.
+The query assigns a Flow Log record to the window containing its `end` timestamp,
+keeps accepted egress with `log_status = OK`, removes non-public destinations,
+aggregates bytes by destination, then aggregates every destination for each
+account/instance/source. This avoids counting one record in adjacent windows and
+closes the original bug where traffic split across many destinations could
+remain under each per-destination threshold. Counters still describe the full
+Flow Log aggregation record, so a record can include traffic that began shortly
+before the window.
 
 ## Authorization and storage
 
@@ -80,8 +85,9 @@ evaluate organization CloudTrail data events under a separately managed trail.
   Lambda runs out of time.
 - SNS failures are not swallowed, and a completion record is not written.
 - Reserved concurrency prevents overlapping detector runs.
-- EventBridge retries twice for up to one hour, then sends the event to an
-  encrypted SQS DLQ.
+- Lambda retries handler failures twice. EventBridge separately retries target
+  delivery failures. Events that exhaust either path go to the encrypted SQS
+  DLQ.
 - CloudWatch alarms cover Lambda errors, throttles, and DLQ messages.
 
 There is a narrow at-least-once boundary after SNS accepts a message and before

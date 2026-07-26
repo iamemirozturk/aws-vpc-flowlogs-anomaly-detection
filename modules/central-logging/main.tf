@@ -239,7 +239,7 @@ resource "aws_s3_bucket" "central_logs" {
 
     precondition {
       condition = (
-        var.glacier_transition_days < var.deep_archive_transition_days &&
+        var.deep_archive_transition_days >= var.glacier_transition_days + 90 &&
         (
           var.log_expiration_days == null ||
           var.deep_archive_transition_days < var.log_expiration_days
@@ -250,7 +250,7 @@ resource "aws_s3_bucket" "central_logs" {
           var.object_lock_retention_days <= var.log_expiration_days
         )
       )
-      error_message = "Storage transitions must be ordered, and expiration cannot precede Object Lock retention."
+      error_message = "Deep Archive must be at least 90 days after Glacier Flexible Retrieval; expiration must follow Deep Archive and Object Lock retention."
     }
   }
 
@@ -309,7 +309,8 @@ resource "aws_s3_bucket_logging" "central_logs" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "central_logs" {
-  bucket = aws_s3_bucket.central_logs.id
+  bucket                                 = aws_s3_bucket.central_logs.id
+  transition_default_minimum_object_size = "varies_by_storage_class"
 
   rule {
     id     = "flow-log-retention"

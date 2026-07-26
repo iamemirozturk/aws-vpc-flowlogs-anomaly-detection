@@ -29,8 +29,10 @@
 - Missing logs: check `DescribeFlowLogs`, bucket ARN format, `log_sources`, Hive
   prefix, KMS ARN encryption, and delivery delay.
 
-For a DLQ alarm, preserve the message, correct the cause, reinvoke the original
-payload, confirm DynamoDB completion, then delete the message.
+For a DLQ alarm, determine whether the message records an exhausted Lambda
+handler failure or EventBridge delivery failure, preserve it, correct the cause,
+reinvoke the original payload, confirm DynamoDB completion, then delete the
+message.
 
 ## Tuning
 

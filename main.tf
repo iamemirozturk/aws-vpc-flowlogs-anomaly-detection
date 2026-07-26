@@ -41,7 +41,6 @@ module "detection_engine" {
   detection_window_minutes   = var.detection_window_minutes
   data_delay_minutes         = var.data_delay_minutes
   alert_email                = var.alert_email
-  detection_schedule         = var.detection_schedule
   lambda_execution_role_arn  = module.central_logging.lambda_execution_role_arn
   lambda_execution_role_name = module.central_logging.lambda_execution_role_name
   environment                = var.environment

@@ -10,6 +10,9 @@ terraform fmt -check -recursive
 terraform init -backend=false
 terraform validate
 terraform test
+terraform -chdir=modules/central-logging init -backend=false
+terraform -chdir=modules/central-logging validate
+terraform -chdir=modules/central-logging test
 terraform -chdir=deployments/spoke init -backend=false
 terraform -chdir=deployments/spoke validate
 terraform -chdir=deployments/spoke test
@@ -34,8 +37,9 @@ Capture the command, tool version, commit SHA, date, and unedited result.
 
 Only send traffic to an endpoint you own and are authorized to test.
 
-For failure evidence, make a disposable target fail, confirm EventBridge retries,
-the DLQ message, and the DLQ alarm, then recover with the original event.
+For failure evidence, make a disposable dependency fail, confirm two Lambda
+handler retries and the DLQ message/alarm. Separately test an EventBridge target
+delivery failure, then recover with the original event.
 
 Useful screenshots show a plan summary, redacted Hive prefix, Glue projection
 properties, Athena statistics/result, Lambda query window, sanitized alert,

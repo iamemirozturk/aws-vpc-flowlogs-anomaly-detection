@@ -16,7 +16,6 @@ log_sources = [
 exfil_threshold_bytes      = 53687091200
 detection_window_minutes   = 60
 data_delay_minutes         = 15
-detection_schedule         = "rate(1 hour)"
 alert_email                = "security-team@example.com"
 excluded_destination_cidrs = ["203.0.113.0/24"]
 

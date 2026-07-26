@@ -10,8 +10,8 @@
 | Retention/integrity | Versioning, lifecycle, optional Object Lock | Review plan and retention APIs |
 | Least privilege | Scoped workgroup, catalog/table, prefixes, keys, topic, table | IAM Access Analyzer and CloudTrail |
 | Query cost | Projection, hour/epoch filters, bytes-scanned cutoff | Athena statistics |
-| Reliable execution | Concurrency, retries, DLQ, health alarms | Controlled failure demo |
-| Retry idempotency | Stable window and DynamoDB completion record | Replay the same event |
+| Reliable execution | Concurrency, Lambda handler retries, EventBridge delivery retries, DLQ, health alarms | Controlled failure demo |
+| Retry idempotency | Stable window/configuration fingerprint and DynamoDB completion record | Replay the same event |
 | Dependency hygiene | Version constraints, lock files, scanners, Dependabot | CI and dependency review |
 
 ## Operator-owned controls

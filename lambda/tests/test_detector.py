@@ -52,8 +52,9 @@ def test_query_covers_every_hour_and_exact_epoch(detector: Any) -> None:
 
     assert "\"day\" = '25' AND \"hour\" = '23'" in query
     assert "\"day\" = '26' AND \"hour\" = '00'" in query
-    assert f'AND "start" < {int(end.timestamp())}' in query
     assert f'AND "end" >= {int(start.timestamp())}' in query
+    assert f'AND "end" < {int(end.timestamp())}' in query
+    assert '"start" <' not in query
     assert "flow_direction = 'egress'" in query
     assert "COALESCE(NULLIF(pkt_dstaddr, '-'), dstaddr)" in query
     assert "203.0.113.0/24" in query
@@ -68,7 +69,21 @@ def test_query_aggregates_per_source_before_threshold(detector: Any) -> None:
     assert "GROUP BY account_id, instance_id, source_ip" in query
     assert "WHERE total_bytes > 1000" in query
     assert "max_by(destination_ip, destination_bytes)" in query
+    assert "AS total_gib" in query
     assert "LIMIT 25" in query
+
+
+def test_window_key_includes_configuration_fingerprint(detector: Any) -> None:
+    start = detector.datetime(2026, 7, 26, 8, 0, tzinfo=detector.timezone.utc)
+    end = start + detector.timedelta(hours=1)
+
+    expected_material = (
+        f"test:{start.isoformat()}:{end.isoformat()}:"
+        f"{detector.DETECTOR_CONFIGURATION_FINGERPRINT}"
+    )
+    expected = detector.hashlib.sha256(expected_material.encode("utf-8")).hexdigest()
+
+    assert detector._window_key(start, end) == expected
 
 
 def test_get_query_results_handles_header_and_sparse_rows(

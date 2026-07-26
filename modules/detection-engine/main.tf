@@ -6,8 +6,12 @@ locals {
   log_group_name   = "/aws/lambda/${local.function_name}"
   topic_name       = "${var.environment}-flowlogs-alerts"
   state_table_name = "${var.environment}-flowlogs-detection-state"
-  log_group_arn    = "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.region}:${var.central_account_id}:log-group:${local.log_group_name}"
-  topic_arn        = "arn:${data.aws_partition.current.partition}:sns:${data.aws_region.current.region}:${var.central_account_id}:${local.topic_name}"
+  schedule_expression = format(
+    "rate(%d minutes)",
+    var.detection_window_minutes,
+  )
+  log_group_arn = "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.region}:${var.central_account_id}:log-group:${local.log_group_name}"
+  topic_arn     = "arn:${data.aws_partition.current.partition}:sns:${data.aws_region.current.region}:${var.central_account_id}:${local.topic_name}"
 }
 
 data "archive_file" "detector" {
@@ -374,13 +378,13 @@ resource "aws_lambda_function" "detector" {
 resource "aws_lambda_function_event_invoke_config" "detector" {
   function_name                = aws_lambda_function.detector.function_name
   maximum_event_age_in_seconds = 3600
-  maximum_retry_attempts       = 0
+  maximum_retry_attempts       = 2
 }
 
 resource "aws_cloudwatch_event_rule" "detector_schedule" {
   name                = "${var.environment}-flowlogs-detector-schedule"
   description         = "Runs the VPC Flow Logs anomaly detector"
-  schedule_expression = var.detection_schedule
+  schedule_expression = local.schedule_expression
   state               = "ENABLED"
 
   tags = var.tags
@@ -454,7 +458,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
 
 resource "aws_cloudwatch_metric_alarm" "dlq_messages" {
   alarm_name          = "${var.environment}-flowlogs-dlq-messages"
-  alarm_description   = "EventBridge could not deliver a detector invocation"
+  alarm_description   = "A detector invocation or EventBridge delivery exhausted retries"
   namespace           = "AWS/SQS"
   metric_name         = "ApproximateNumberOfMessagesVisible"
   statistic           = "Maximum"

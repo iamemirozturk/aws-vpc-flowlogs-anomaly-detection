@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
   <title id="title">Centralized VPC Flow Logs anomaly detection architecture</title>
-  <desc id="desc">Spoke VPC Flow Logs deliver Parquet objects directly to encrypted central S3. Glue partition projection and Athena support a scheduled Lambda detector with DynamoDB idempotency, SNS alerts, an EventBridge dead-letter queue, and CloudWatch alarms.</desc>
+  <desc id="desc">Spoke VPC Flow Logs deliver Parquet objects directly to encrypted central S3. Glue partition projection and Athena support a scheduled Lambda detector with DynamoDB idempotency, SNS alerts, a shared invocation and delivery dead-letter queue, and CloudWatch alarms.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10z" fill="#475569"/>
@@ -56,7 +56,7 @@
 
   <rect x="1260" y="335" width="245" height="105" class="box security"/>
   <text x="1382" y="375" class="label">Lambda detector</text>
-  <text x="1382" y="401" class="small">exact delayed window</text>
+  <text x="1382" y="401" class="small">delayed record-end window</text>
   <path d="M1260 387H1190" class="arrow"/>
   <rect x="1260" y="190" width="245" height="80" class="box aws"/>
   <text x="1382" y="224" class="label">EventBridge</text>
@@ -65,7 +65,7 @@
 
   <rect x="940" y="505" width="250" height="95" class="box reliability"/>
   <text x="1065" y="543" class="label">DynamoDB</text>
-  <text x="1065" y="569" class="small">completed-window idempotency</text>
+  <text x="1065" y="569" class="small">window + configuration idempotency</text>
   <path d="M1320 440C1300 520 1245 552 1190 552" class="arrow"/>
   <rect x="1260" y="505" width="245" height="95" class="box reliability"/>
   <text x="1382" y="543" class="label">Amazon SNS</text>
@@ -74,8 +74,9 @@
 
   <rect x="555" y="505" width="300" height="95" class="box reliability"/>
   <text x="705" y="543" class="label">SQS dead-letter queue</text>
-  <text x="705" y="569" class="small">failed EventBridge delivery</text>
+  <text x="705" y="569" class="small">failed invocation or delivery</text>
   <path d="M1260 230C1020 115 710 160 705 505" class="arrow"/>
+  <path d="M1260 420C1080 475 900 520 855 545" class="arrow"/>
 
   <rect x="940" y="645" width="565" height="80" class="box reliability"/>
   <text x="1222" y="678" class="label">CloudWatch logs, metrics, and alarms</text>

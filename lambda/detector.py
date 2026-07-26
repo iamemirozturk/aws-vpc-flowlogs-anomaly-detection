@@ -1,8 +1,9 @@
 """Scheduled VPC Flow Logs exfiltration detector.
 
-The function queries an exact, delayed time window in Athena, aggregates
-external egress by source entity, publishes one bounded SNS notification, and
-records the completed window in DynamoDB so EventBridge retries are idempotent.
+The function queries a delayed record-end window in Athena, aggregates external
+egress by source entity, publishes one bounded SNS notification, and records the
+completed window and configuration in DynamoDB so replayed events are
+idempotent.
 """
 
 from __future__ import annotations
@@ -65,6 +66,22 @@ def _load_excluded_cidrs() -> tuple[str, ...]:
 
 
 EXCLUDED_DESTINATION_CIDRS = _load_excluded_cidrs()
+DETECTOR_CONFIGURATION_FINGERPRINT = hashlib.sha256(
+    json.dumps(
+        {
+            "athena_database": ATHENA_DATABASE,
+            "athena_table": ATHENA_TABLE,
+            "athena_workgroup": ATHENA_WORKGROUP,
+            "threshold_bytes": EXFIL_THRESHOLD_BYTES,
+            "window_minutes": DETECTION_WINDOW_MINUTES,
+            "data_delay_minutes": DATA_DELAY_MINUTES,
+            "max_alerts_per_run": MAX_ALERTS_PER_RUN,
+            "excluded_destination_cidrs": EXCLUDED_DESTINATION_CIDRS,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8"),
+).hexdigest()
 
 
 def _validate_configuration() -> None:
@@ -162,8 +179,8 @@ WITH normalized AS (
     WHERE (
         {partitions}
     )
-      AND "start" < {end_epoch}
       AND "end" >= {start_epoch}
+      AND "end" < {end_epoch}
       AND action = 'ACCEPT'
       AND flow_direction = 'egress'
       AND log_status = 'OK'
@@ -207,7 +224,7 @@ SELECT
     top_destination_ip,
     unique_destinations,
     total_bytes,
-    ROUND(total_bytes / 1073741824.0, 2) AS total_gb,
+    ROUND(total_bytes / 1073741824.0, 2) AS total_gib,
     total_packets,
     flow_records
 FROM entity_totals
@@ -303,7 +320,7 @@ def get_query_results(query_id: str) -> list[dict[str, str]]:
 def _window_key(window_start: datetime, window_end: datetime) -> str:
     key_material = (
         f"{ENVIRONMENT}:{window_start.isoformat()}:{window_end.isoformat()}:"
-        f"{EXFIL_THRESHOLD_BYTES}"
+        f"{DETECTOR_CONFIGURATION_FINGERPRINT}"
     )
     return hashlib.sha256(key_material.encode("utf-8")).hexdigest()
 

@@ -10,16 +10,17 @@ published.
   Terraform, S3, Athena, Lambda, and SNS`
 - Topics: `aws-security`, `vpc-flow-logs`, `terraform`, `athena`,
   `threat-detection`, `cloud-security`, `multi-account`
-- Social preview: export `docs/architecture.svg` at a suitable social-card size
+- Social preview: crop `docs/architecture.png` to GitHub's social-card size
 - Website: use a real demo/article URL or leave it empty
 
 ## Default branch and protection
 
-1. Rename the current `aws` default branch to `main` after checking open clones,
-   links, and automation.
-2. Keep both branch names in the workflow during migration; remove `aws` only
-   after the rename is complete.
-3. Protect `main` with:
+1. Protect the current `aws` default branch immediately.
+2. Treat a future rename from `aws` to `main` as a separate migration after
+   checking open clones, links, and automation.
+3. Keep both branch names in the workflow during that migration and apply the
+   same protection to `main` before removing `aws`.
+4. Require:
    - pull requests and at least one approval;
    - stale approval dismissal;
    - code-owner review for sensitive paths;

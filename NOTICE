@@ -1,4 +1,6 @@
 This project is an independent reference implementation and is not endorsed by
 Amazon Web Services. AWS and related service names are trademarks of Amazon.com,
-Inc. or its affiliates. No third-party artwork or service icons are distributed
-with this repository.
+Inc. or its affiliates. The PNG architecture diagram uses AWS Architecture Icons
+for identification and explanatory purposes; those icons and AWS marks remain
+the property of Amazon.com, Inc. or its affiliates. The project code and original
+diagram composition remain licensed under the repository's MIT License.

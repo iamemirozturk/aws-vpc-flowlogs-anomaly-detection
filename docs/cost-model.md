@@ -27,7 +27,10 @@ Use current [CloudWatch/VPC Flow Logs pricing](https://aws.amazon.com/cloudwatch
 [Lambda](https://aws.amazon.com/lambda/pricing/).
 
 Parquet, exact hourly pruning, the Athena cutoff, S3 bucket keys, 30-day result
-expiration, archive transitions, and partition projection constrain cost.
-Glacier minimum-duration/retrieval charges, Object Lock, and access-log objects
-must also be modeled. Build low/expected/high scenarios and budgets before
-organization-wide onboarding.
+expiration, archive transitions, and partition projection constrain cost. The
+lifecycle configuration explicitly retains the storage-class-specific minimum
+object-size behavior so small Flow Log objects can transition to Glacier classes;
+model per-object transition requests and archive metadata because small files can
+cost more than they save. Glacier minimum-duration/retrieval charges, Object
+Lock, and access-log objects must also be modeled. Build low/expected/high
+scenarios and budgets before organization-wide onboarding.
