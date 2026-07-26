@@ -85,25 +85,18 @@ variable "alert_email" {
   }
 }
 
-variable "detection_schedule" {
-  description = "EventBridge schedule expression for the detector."
-  type        = string
-  default     = "rate(1 hour)"
-
-  validation {
-    condition     = can(regex("^(rate|cron)\\(.+\\)$", var.detection_schedule))
-    error_message = "detection_schedule must be an EventBridge rate(...) or cron(...) expression."
-  }
-}
-
 variable "detection_window_minutes" {
-  description = "Length of each rolling detector query window."
+  description = "Length and invocation interval of each detector window, in whole minutes."
   type        = number
   default     = 60
 
   validation {
-    condition     = var.detection_window_minutes >= 5 && var.detection_window_minutes <= 1440
-    error_message = "detection_window_minutes must be between 5 and 1440."
+    condition = (
+      var.detection_window_minutes >= 5 &&
+      var.detection_window_minutes <= 1440 &&
+      floor(var.detection_window_minutes) == var.detection_window_minutes
+    )
+    error_message = "detection_window_minutes must be an integer between 5 and 1440."
   }
 }
 

@@ -19,6 +19,10 @@ DLQ/alarms, and changed bucket ownership/policies/lifecycle.
 7. Test subscription, replay idempotency, DLQ, and alarms.
 8. Remove obsolete roles only after access analysis shows no remaining use.
 
+The EventBridge rate is derived from `detection_window_minutes`; remove the old
+`detection_schedule` input from deployment variables. Deep Archive must be at
+least 90 days after Glacier Flexible Retrieval.
+
 Object Lock cannot be disabled on an existing bucket. The guide does not publish
 universal `state mv` commands because actual old state addresses must be
 inspected and the original root could not successfully plan as written.

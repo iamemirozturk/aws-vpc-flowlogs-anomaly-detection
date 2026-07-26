@@ -42,3 +42,8 @@ output "lambda_execution_role_name" {
   description = "Execution role name used for detector-specific policy attachment."
   value       = aws_iam_role.lambda_execution.name
 }
+
+output "lifecycle_transition_minimum_object_size" {
+  description = "Effective S3 lifecycle minimum-object-size transition behavior."
+  value       = aws_s3_bucket_lifecycle_configuration.central_logs.transition_default_minimum_object_size
+}

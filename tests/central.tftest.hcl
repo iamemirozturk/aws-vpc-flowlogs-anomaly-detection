@@ -56,4 +56,22 @@ run "central_configuration_plans" {
     condition     = output.glue_table_name == "flow_logs"
     error_message = "The detector and explicit Glue table must use flow_logs."
   }
+
+  assert {
+    condition = (
+      module.central_logging.lifecycle_transition_minimum_object_size ==
+      "varies_by_storage_class"
+    )
+    error_message = "Flow Log lifecycle transitions must explicitly include small archive objects."
+  }
+
+  assert {
+    condition     = module.detection_engine.maximum_retry_attempts == 2
+    error_message = "Transient detector failures must receive two Lambda asynchronous retries."
+  }
+
+  assert {
+    condition     = module.detection_engine.schedule_expression == "rate(60 minutes)"
+    error_message = "The invocation interval must equal the detection window."
+  }
 }

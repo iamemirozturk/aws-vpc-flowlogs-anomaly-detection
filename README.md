@@ -1,6 +1,6 @@
 # AWS VPC Flow Logs centralized anomaly detection
 
-![Architecture](docs/architecture.svg)
+![Architecture](docs/architecture.png)
 
 [![Quality and security](https://github.com/iamemirozturk/aws-vpc-flowlogs-anomaly-detection/actions/workflows/terraform-ci.yml/badge.svg?branch=aws)](https://github.com/iamemirozturk/aws-vpc-flowlogs-anomaly-detection/actions/workflows/terraform-ci.yml)
 [![Terraform](https://img.shields.io/badge/Terraform-1.7%2B-7B42BC?logo=terraform)](https://developer.hashicorp.com/terraform)
@@ -25,8 +25,8 @@ service or a substitute for threat-specific tuning.
   addresses when available, handles IPv4/IPv6 exclusions, and totals all
   external destinations per source before applying the threshold.
 - One bounded SNS notification per run, DynamoDB window idempotency, reserved
-  Lambda concurrency, EventBridge retries, an encrypted SQS dead-letter queue,
-  and CloudWatch alarms.
+  Lambda concurrency, Lambda handler retries, EventBridge delivery retries, an
+  encrypted SQS dead-letter queue, and CloudWatch alarms.
 - Customer-managed KMS keys, S3 Block Public Access, TLS-only policies,
   versioning, lifecycle controls, access logging, scoped detector permissions,
   and an Athena scan limit.
@@ -136,6 +136,9 @@ terraform fmt -check -recursive
 terraform init -backend=false
 terraform validate
 terraform test
+terraform -chdir=modules/central-logging init -backend=false
+terraform -chdir=modules/central-logging validate
+terraform -chdir=modules/central-logging test
 terraform -chdir=deployments/spoke init -backend=false
 terraform -chdir=deployments/spoke validate
 terraform -chdir=deployments/spoke test
@@ -161,16 +164,25 @@ window_end   = T - data_delay_minutes
 window_start = window_end - detection_window_minutes
 ```
 
-The SQL enumerates every hourly partition touched and filters record
-`"start"`/`"end"` epochs. It keeps `ACCEPT`, `egress`, `OK` records; prefers
-packet addresses; removes private, loopback, link-local, carrier-grade NAT, and
-multicast destinations plus operator exclusions; and applies the threshold
-after aggregating every destination for each source.
+The detector runs at the same whole-minute interval as
+`detection_window_minutes`, so adjacent windows neither gap nor overlap. The SQL
+enumerates every hourly partition touched and assigns each Flow Log record to the
+half-open window containing its `"end"` timestamp. It keeps `ACCEPT`, `egress`,
+`OK` records; prefers packet addresses; removes private, loopback, link-local,
+carrier-grade NAT, and multicast destinations plus operator exclusions; and
+applies the threshold after aggregating every destination for each source.
 
-EventBridge retries retain the event timestamp. A hash of the window is stored
-in DynamoDB only after query and alert success, so completed retries are
-skipped. A crash after SNS accepts a message but before the DynamoDB write can
-still duplicate an alert; consumers should deduplicate on the window.
+Flow Log counters describe an aggregation record, not individual packet
+timestamps. A record whose aggregation started before the window can therefore
+include a bounded amount of earlier traffic, but the record is assigned to only
+one adjacent window.
+
+Lambda retries and EventBridge delivery retries retain the event timestamp. A
+hash of the window and detector configuration is stored in DynamoDB only after
+query and alert success, so completed retries are skipped while a changed
+configuration can intentionally re-evaluate a replayed window. A crash after SNS
+accepts a message but before the DynamoDB write can still duplicate an alert;
+consumers should deduplicate on the window.
 
 ## Operations and investigation
 

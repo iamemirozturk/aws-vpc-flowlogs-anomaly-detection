@@ -39,6 +39,15 @@ variable "detection_window_minutes" {
   description = "Length of a detector query window."
   type        = number
   default     = 60
+
+  validation {
+    condition = (
+      var.detection_window_minutes >= 5 &&
+      var.detection_window_minutes <= 1440 &&
+      floor(var.detection_window_minutes) == var.detection_window_minutes
+    )
+    error_message = "detection_window_minutes must be an integer between 5 and 1440."
+  }
 }
 
 variable "data_delay_minutes" {
@@ -63,11 +72,6 @@ variable "alert_email" {
   type        = string
   default     = null
   nullable    = true
-}
-
-variable "detection_schedule" {
-  description = "EventBridge schedule expression."
-  type        = string
 }
 
 variable "lambda_execution_role_arn" {

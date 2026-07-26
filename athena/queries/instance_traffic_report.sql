@@ -14,8 +14,8 @@ SELECT
     COUNT(*) AS flow_records
 FROM "{{database}}"."flow_logs"
 WHERE ({{partition_predicate}})
-  AND "start" < {{window_end_epoch}}
   AND "end" >= {{window_start_epoch}}
+  AND "end" < {{window_end_epoch}}
   AND instance_id = '{{instance_id}}'
 GROUP BY
     DATE(from_unixtime("start")),

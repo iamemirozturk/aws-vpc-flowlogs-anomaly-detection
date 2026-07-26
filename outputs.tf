@@ -39,7 +39,7 @@ output "lambda_function_name" {
 }
 
 output "detector_dlq_url" {
-  description = "SQS dead-letter queue URL for failed EventBridge deliveries."
+  description = "SQS dead-letter queue URL for failed detector invocations and EventBridge deliveries."
   value       = module.detection_engine.dlq_url
 }
 
