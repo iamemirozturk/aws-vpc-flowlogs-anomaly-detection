@@ -1,166 +1,99 @@
-# Architecture Deep Dive
+# Architecture
 
-## Overview
+## Trust and state boundaries
 
-This document provides a detailed explanation of each component in the VPC Flow Logs Centralized Anomaly Detection Platform and the design decisions behind them.
+The design has two deployment roots because Terraform provider instances cannot
+be selected dynamically for `for_each`. Central security infrastructure and
+workload telemetry also have different credentials, owners, and lifecycles.
 
----
+- The repository root is deployed in the Security/Logging account and owns
+  storage, catalog, query, detection, and alerting resources.
+- `deployments/spoke` is deployed once per account and Region. It assumes one
+  explicit role and creates Flow Logs for a set of VPCs.
+- Every root uses independent remote state. Backend bootstrap remains external.
+- `allowed_account_ids` and preconditions fail when credentials resolve to the
+  wrong account.
 
-## 1. Multi-Account Strategy
+## Data path
 
-The solution follows the AWS Organizations pattern of separating workloads into **spoke accounts** and centralizing security tooling into a dedicated **Security/Logging account**.
+1. The EC2 Flow Logs service writes enriched Parquet objects directly to central
+   S3. An IAM delivery role is for CloudWatch Logs destinations, not this S3
+   destination.
+2. Hive-compatible hourly prefixes encode account, service, Region, year,
+   month, day, and hour.
+3. An explicit Glue table describes the schema. Athena partition projection
+   maps predicates to prefixes without a crawler.
+4. EventBridge invokes Lambda. Lambda derives an exact delayed window from the
+   event timestamp and submits a partition-pruned Athena query.
+5. Lambda publishes one bounded SNS notification when sources exceed the
+   threshold, then records the completed window in DynamoDB.
 
-```
-AWS Organizations
-├── Management Account
-├── Security OU
-│   └── Security/Logging Account  ← Central bucket lives here
-├── Production OU
-│   ├── App Account A             ← Spoke: VPC-A, VPC-B
-│   └── App Account B             ← Spoke: VPC-C
-└── Staging OU
-    └── App Account C             ← Spoke: VPC-D
-```
-
-**Why this matters:**
-- Spoke accounts cannot delete or tamper with logs (separate account boundary)
-- Security team has unified visibility without needing access to each spoke account
-- IAM permissions are scoped — spoke delivery roles can only `PutObject` to their prefix
-
----
-
-## 2. Log Ingestion Layer
-
-### VPC Flow Log Format
-
-The solution configures an **enriched flow log format** that includes fields not present in the AWS default:
-
-| Field | Purpose |
-|---|---|
-| `instance-id` | Attribute traffic to a specific EC2 instance |
-| `vpc-id` | Identify the originating VPC |
-| `subnet-id` | Granular subnet attribution |
-| `flow-direction` | Distinguish ingress vs egress |
-| `pkt-src-aws-service` | Identify AWS service as traffic source |
-| `pkt-dst-aws-service` | Identify AWS service as traffic destination |
-| `tcp-flags` | Enable TCP connection state analysis |
-
-### Parquet Format with Hive Partitioning
-
-Logs are stored as **Apache Parquet** files with Hive-compatible partition paths:
-
-```
-s3://central-logs/AWSLogs/
-  {account-id}/
-    vpcflowlogs/
-      {region}/
-        {year}/
-          {month}/
-            {day}/
-              {hour}/
-                *.parquet
+```text
+s3://BUCKET/AWSLogs/
+  aws-account-id=ACCOUNT/aws-service=vpcflowlogs/aws-region=REGION/
+  year=YYYY/month=MM/day=DD/hour=HH/
 ```
 
-Parquet over plain-text provides:
-- ~4x smaller file size (columnar compression)
-- Athena reads only relevant columns → lower cost
-- Native type support (timestamps, integers) without casting
+## Detector model
 
----
+The custom record includes default fields plus VPC, subnet, instance, TCP flag,
+packet address, AWS service, direction, and traffic path context. Packet
+addresses are preferred because intermediate network interfaces can change
+`srcaddr` and `dstaddr`.
 
-## 3. Schema Management — Glue Crawler
+The half-open analytic interval is:
 
-The Glue Crawler is configured with `CRAWL_NEW_FOLDERS_ONLY` to avoid re-processing already-catalogued data. This reduces Glue DPU-hours consumed per run.
-
-**Partition Discovery:** The crawler automatically discovers year/month/day/hour partitions and registers them in the Glue Catalog, enabling Athena partition pruning.
-
-**Optimization Path:** The repo includes migration guidance to **Athena Partition Projection**, which eliminates the Glue Crawler entirely by declaring partition ranges at query time — recommended for stable, predictable partition schemes.
-
----
-
-## 4. Detection Logic
-
-### Threshold Model
-
-The detector uses a **bytes-aggregated, time-windowed** model:
-
-```
-FOR EACH (account_id, instance_id, srcaddr, dstaddr):
-  IF SUM(bytes) WHERE action=ACCEPT AND dst ∉ RFC-1918 > threshold:
-    ALERT
+```text
+[EventBridge time - delay - window, EventBridge time - delay)
 ```
 
-The RFC-1918 exclusion filters out:
-- `10.0.0.0/8` — Internal VPC traffic
-- `172.16.0.0/12` — Private subnets (Transit Gateway, VPN)
-- `192.168.0.0/16` — On-premises via Direct Connect / VPN
-- `127.x.x.x` — Loopback
-- `169.254.x.x` — Link-local / EC2 metadata service
+The query keeps accepted egress with `log_status = OK`, removes non-public
+destinations, aggregates bytes by destination, then aggregates every destination
+for each account/instance/source. This closes the original bug where traffic
+split across many destinations could remain under each per-destination threshold.
 
-### False Positive Reduction
+## Authorization and storage
 
-To reduce noise, consider these tuning strategies (configurable via variables):
+The central bucket grants `delivery.logs.amazonaws.com` `PutObject` only to
+each enrolled Hive account prefix. Each write statement pairs the source account
+with its logs-service source ARN. `GetBucketAcl` uses the same confused-deputy
+conditions.
 
-1. **AWS Service exclusions** — Use `pkt_dst_aws_service` to exclude known S3/CloudFront egress
-2. **Trusted CIDR allowlisting** — Additional SQL conditions per deployment
-3. **Per-instance thresholds** — Future roadmap item using DynamoDB config table
-4. **Time-of-day context** — Flag overnight spikes that differ from business-hours baselines
+The Flow Logs KMS key restricts the delivery service to the central bucket
+encryption context. Lambda permissions scope Athena to one workgroup, Glue to
+one catalog/database/table, S3 to log and result prefixes, and KMS to the
+project keys. A separate detector policy covers its topic and state table.
 
----
+All buckets block public access, enforce ownership, version objects, and deny
+non-TLS requests. Flow Logs and query results use customer-managed keys and S3
+bucket keys. Server access logs use a separate encrypted, versioned bucket.
+Athena results expire after 30 days. Flow Logs transition to archive tiers;
+current-object expiration is optional.
 
-## 5. Cost Architecture
+Object Lock is opt-in and defaults to GOVERNANCE mode. Server access logging is
+not an independent immutable audit trail; high-assurance deployments should
+evaluate organization CloudTrail data events under a separately managed trail.
 
-### Athena Cost Control
+## Failure behavior
 
-The Athena Workgroup enforces a `bytes_scanned_cutoff_per_query` of 10 GB, preventing runaway queries. Combined with partition pruning, typical detection queries scan only the current day's partition (~100 MB–5 GB depending on environment size).
+- Athena failures and timeouts become Lambda errors; queries are stopped before
+  Lambda runs out of time.
+- SNS failures are not swallowed, and a completion record is not written.
+- Reserved concurrency prevents overlapping detector runs.
+- EventBridge retries twice for up to one hour, then sends the event to an
+  encrypted SQS DLQ.
+- CloudWatch alarms cover Lambda errors, throttles, and DLQ messages.
 
-**Cost formula:**
-```
-Athena cost = (bytes_scanned / 1TB) × $5.00
-With daily partition (~1 GB scanned): $0.005 per query
-At hourly detection (720 queries/month): ~$3.60/month
-```
+There is a narrow at-least-once boundary after SNS accepts a message and before
+DynamoDB records completion. Consumers should deduplicate using environment and
+window timestamps.
 
-### Glue Crawler Cost
+## Scale and availability
 
-Each crawler run uses approximately 1 DPU-hour at `$0.44/DPU-hour`. Daily scheduling = `~$13.20/month`. Switching to Partition Projection eliminates this cost entirely.
+The system is regional and has no cross-Region failover. The S3 bucket policy
+has a 20 KB limit; one write statement per account/Region provides strong
+pairing but may not scale to a very large organization. At that point, evaluate
+an Organizations condition and automated onboarding with explicit tests.
 
----
-
-## 6. Security Controls
-
-### Bucket Policy Defense in Depth
-
-The central bucket policy enforces three controls simultaneously:
-1. **`aws:SecureTransport`** — All `s3:*` denied over HTTP
-2. **`aws:SourceAccount`** — `PutObject` allowed only from enrolled spoke account IDs
-3. **`s3:x-amz-acl: bucket-owner-full-control`** — Prevents spoke accounts from retaining object ownership
-
-### Object Lock
-
-S3 Object Lock in **COMPLIANCE mode** prevents even the bucket owner (root user) from deleting or overwriting logs during the retention period. This satisfies regulatory requirements for log immutability (SOC 2 CC7.2, NIST 800-53 AU-9).
-
----
-
-## 7. Observability
-
-| Signal | Where |
-|---|---|
-| Lambda invocations & errors | CloudWatch Metrics (auto) |
-| Lambda execution logs | CloudWatch Logs `/aws/lambda/prod-flowlogs-detector` |
-| Athena query history | Athena query history + CloudWatch Metrics |
-| Glue Crawler job history | AWS Glue console + CloudWatch |
-| S3 access patterns | S3 server access logs → access logs bucket |
-
----
-
-## 8. Evolution Path
-
-```
-Phase 1 (This Repo)          Phase 2                    Phase 3
-─────────────────────        ─────────────────────────  ─────────────────────────
-Glue Crawler                 Partition Projection        ML-based anomaly (SageMaker)
-SQL threshold detection  →   Per-instance thresholds  → Behavioral baselines
-SNS email alerts             Slack / PagerDuty           SIEM integration (Splunk)
-Manual spoke onboarding      AWS Orgs auto-onboarding    QuickSight dashboard
-```
+The Athena scan cutoff can reject legitimate high-volume windows. Tune it from
+query statistics rather than removing it.

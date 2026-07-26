@@ -1,333 +1,211 @@
-# 🔍 AWS VPC Flow Logs — Centralized Anomaly Detection Platform
+# AWS VPC Flow Logs centralized anomaly detection
 
-<p align="center">
-  <img src="docs/architecture.png" alt="Architecture Diagram" width="860"/>
-</p>
+![Architecture](docs/architecture.svg)
 
-<p align="center">
-  <a href="https://www.terraform.io/"><img src="https://img.shields.io/badge/Terraform-1.6+-7B42BC?style=flat&logo=terraform" /></a>
-  <a href="https://aws.amazon.com/"><img src="https://img.shields.io/badge/AWS-Multi--Account-FF9900?style=flat&logo=amazon-aws" /></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" /></a>
-  <a href="https://github.com/iamemirozturk/aws-vpc-flowlogs-anomaly-detection/actions"><img src="https://img.shields.io/badge/CI-Terraform%20Validate-blue?logo=github-actions" /></a>
-  <img src="https://img.shields.io/badge/Security-tfsec%20%7C%20Checkov-critical" />
-  <img src="https://img.shields.io/badge/CIS-AWS%20Foundations%20v1.5-blue" />
-</p>
+[![Quality and security](https://github.com/iamemirozturk/aws-vpc-flowlogs-anomaly-detection/actions/workflows/terraform-ci.yml/badge.svg?branch=aws)](https://github.com/iamemirozturk/aws-vpc-flowlogs-anomaly-detection/actions/workflows/terraform-ci.yml)
+[![Terraform](https://img.shields.io/badge/Terraform-1.7%2B-7B42BC?logo=terraform)](https://developer.hashicorp.com/terraform)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
----
+This repository is a deployable reference implementation for centralizing VPC
+Flow Logs from multiple AWS accounts, querying enriched Parquet records with
+Amazon Athena, and alerting on unusually large accepted egress. It demonstrates
+security architecture and engineering practice; it is not a managed detection
+service or a substitute for threat-specific tuning.
 
-## 📌 Overview
+## What is implemented
 
-This project implements a **centralized, multi-account network traffic visibility and anomaly detection platform** on AWS. It aggregates VPC Flow Logs from multiple spoke accounts into a central Security/Logging account, enabling SQL-based analysis via Amazon Athena and automated alerting via Lambda + SNS.
+- Direct cross-account Flow Logs delivery to central S3. S3 delivery does not
+  use an IAM delivery role.
+- One central Terraform state and one independent state per spoke
+  account/Region, with account-ID provider safeguards.
+- Enriched Parquet logs, hourly Hive prefixes, and a Glue table with Athena
+  partition projection. No crawler or partition-registration job is required.
+- A delayed exact rolling-window query that checks accepted egress, uses packet
+  addresses when available, handles IPv4/IPv6 exclusions, and totals all
+  external destinations per source before applying the threshold.
+- One bounded SNS notification per run, DynamoDB window idempotency, reserved
+  Lambda concurrency, EventBridge retries, an encrypted SQS dead-letter queue,
+  and CloudWatch alarms.
+- Customer-managed KMS keys, S3 Block Public Access, TLS-only policies,
+  versioning, lifecycle controls, access logging, scoped detector permissions,
+  and an Athena scan limit.
+- Terraform validation, TFLint, Flake8, unit tests, tfsec, Checkov, Dependabot,
+  and pre-commit hooks.
 
-**Primary use cases:**
-- 🚨 Detect potential **data exfiltration** (outbound traffic spikes > configurable threshold)
-- 🔎 Perform **cross-account traffic analysis** without complex cross-account queries
-- 📊 Generate **compliance and audit reports** for specific instances, VPCs, or date ranges
-- 💰 Gain **cost visibility** by attributing data transfer to specific workloads
+## Detection boundary
 
----
+The detector identifies volume-based external egress above a static threshold
+for each `(account, instance, source IP)` in a configured window. It is a
+transparent first-stage analytic, not proof of malicious intent. NAT gateways,
+proxies, shared interfaces, approved bulk exports, and delayed or `SKIPDATA`
+records affect attribution and completeness.
 
-## 🏗️ Architecture
+See the [threat model](docs/threat-model.md) for assumptions and residual risks.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        SPOKE ACCOUNTS (N)                           │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
-│  │  VPC-A   │  │  VPC-B   │  │  VPC-C   │  │  IAM Cross-Acct  │   │
-│  │Flow Logs │  │Flow Logs │  │Flow Logs │  │  Delivery Role   │   │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────────────┘   │
-└───────┼──────────────┼─────────────┼────────────────────────────────┘
-        │              │             │   (Cross-Account S3 Delivery)
-        ▼              ▼             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    SECURITY / LOGGING ACCOUNT                       │
-│                                                                     │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │              S3 Central Log Bucket                          │   │
-│  │  s3://central-logs/AWSLogs/{account}/{vpc}/{year}/{month}/  │   │
-│  └──────────────────────────────┬──────────────────────────────┘   │
-│                                 │                                   │
-│          ┌──────────────────────┼─────────────────┐                │
-│          ▼                      ▼                  ▼                │
-│  ┌──────────────┐    ┌─────────────────┐   ┌────────────────┐      │
-│  │  AWS Glue    │    │  Amazon Athena  │   │  EventBridge   │      │
-│  │  Crawler     │───▶│  (SQL Queries)  │◀──│  (Schedule)    │      │
-│  │  (Scheduled) │    │  Glue Catalog   │   └───────┬────────┘      │
-│  └──────────────┘    └────────┬────────┘           │               │
-│                               │              ┌──────▼──────┐        │
-│                               │              │   Lambda    │        │
-│                               └─────────────▶│  Detector   │        │
-│                                              └──────┬──────┘        │
-│                                                     │               │
-│                                              ┌──────▼──────┐        │
-│                                              │  Amazon SNS │        │
-│                                              │  (Alerts)   │        │
-│                                              └─────────────┘        │
-└─────────────────────────────────────────────────────────────────────┘
-```
+## Repository layout
 
-### Key Design Decisions
-
-| Decision | Rationale |
-|---|---|
-| **S3 over CloudWatch for log delivery** | Up to 80% lower ingestion cost at scale |
-| **Glue Crawler + Athena** | Serverless, schema-on-read, no ETL pipeline needed |
-| **Partition pruning (year/month/day)** | Prevents full table scans; controls Athena query costs |
-| **Lambda threshold detection** | Transforms passive analytics into active alerting |
-| **SNS for alerting** | Flexible fan-out: email, PagerDuty, Slack, SIEM |
-| **Centralized logging account** | Separation of concerns; spoke accounts can't tamper with logs |
-
----
-
-## 🧩 Module Structure
-
-```
+```text
 .
-├── modules/
-│   ├── central-logging/        # S3 bucket, Glue DB, Athena workgroup, KMS
-│   ├── spoke-account/          # VPC Flow Log enablement + cross-account IAM role
-│   └── detection-engine/       # Lambda, EventBridge rule, SNS topic
-├── lambda/
-│   └── detector.py             # Anomaly detection logic
-├── athena/
-│   └── queries/
-│       ├── top_talkers.sql
-│       ├── exfil_detection.sql
-│       ├── cross_account_summary.sql
-│       └── instance_traffic_report.sql
+├── athena/queries/                 # Parameterized investigation queries
+├── deployments/spoke/             # Separate spoke account/Region root
+├── docs/                           # Architecture, threat model, runbook, demo
 ├── examples/
-│   ├── single-account/         # Quick start for single-account testing
-│   └── multi-account/          # Full org-wide deployment
-├── docs/
-│   ├── architecture.md
-│   ├── architecture.drawio
-│   └── architecture.png
-├── .github/workflows/
-│   ├── terraform-ci.yml
-│   └── security-scan.yml
-├── main.tf
-├── variables.tf
-├── outputs.tf
-├── providers.tf
+│   ├── central/                    # Central root variables
+│   └── spoke/                      # One spoke deployment variables
+├── lambda/
+│   ├── detector.py
+│   └── tests/
+├── modules/
+│   ├── central-logging/            # S3, KMS, Glue table, Athena, Lambda IAM
+│   ├── detection-engine/           # Lambda, SNS, state, DLQ, alarms
+│   └── spoke-account/              # VPC Flow Logs only
+├── main.tf                         # Central account root
 └── versions.tf
 ```
 
----
+## Prerequisites
 
-## 🚀 Prerequisites
+- Terraform `>= 1.7, < 2.0`
+- AWS CLI v2 and short-lived credentials
+- Python 3.12 for local tests
+- A unique central log bucket name
+- A central principal allowed to manage the project resources
+- An assumable deployment role in every spoke account with permission to
+  describe VPCs and create, update, tag, and delete VPC Flow Logs
+- A remote state bucket configured separately from this project
 
-| Requirement | Version / Notes |
-|---|---|
-| Terraform | `>= 1.6` |
-| AWS CLI | `>= 2.x`, configured with appropriate profiles |
-| Python | `>= 3.11` (for Lambda) |
-| tfsec | Latest (optional, for local security scanning) |
-| checkov | Latest (optional, for local policy checks) |
+The repository does not create the Terraform backend or cross-account deployment
+roles. Those bootstrap resources normally have a different owner and lifecycle.
 
-### AWS Permissions Required
+## Deploy
 
-**Central (Security/Logging) Account:**
-- `s3:*` on the central log bucket
-- `glue:*` on the Flow Logs database
-- `athena:*` on the designated workgroup
-- `lambda:*` for the detection engine
-- `sns:*` for alerting
-- `kms:*` for log encryption
-
-**Spoke Accounts:**
-- `ec2:CreateFlowLogs` and `ec2:DescribeVpcs`
-- `iam:CreateRole` / `iam:AttachRolePolicy` for the delivery role
-- Cross-account `s3:PutObject` to the central bucket
-
----
-
-## ⚙️ Quick Start
-
-### 1 — Clone & configure
+### 1. Central account
 
 ```bash
-git clone https://github.com/iamemirozturk/aws-vpc-flowlogs-anomaly-detection.git
-cd aws-vpc-flowlogs-anomaly-detection
-cp examples/multi-account/terraform.tfvars.example terraform.tfvars
-```
+cp examples/central/terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars.
 
-### 2 — Edit `terraform.tfvars`
+# Recommended: copy, edit, and commit backend.tf in a private deployment repo.
+cp backend.tf.example backend.tf
 
-```hcl
-# Central logging account
-central_account_id   = "111122223333"
-central_region       = "us-east-1"
-log_bucket_name      = "org-central-vpc-flowlogs"
-
-# Spoke accounts to onboard
-spoke_accounts = [
-  { account_id = "444455556666", vpc_ids = ["vpc-aaaa1111", "vpc-bbbb2222"] },
-  { account_id = "777788889999", vpc_ids = ["vpc-cccc3333"] },
-]
-
-# Anomaly detection thresholds
-exfil_threshold_bytes = 53687091200   # 50 GB
-alert_email           = "security-team@example.com"
-detection_schedule    = "rate(1 hour)"
-```
-
-### 3 — Deploy central account resources
-
-```bash
-export AWS_PROFILE=central-account
-
+export AWS_PROFILE=security-logging
 terraform init
-terraform workspace new central
-terraform plan -target=module.central_logging
-terraform apply -target=module.central_logging
+terraform plan -out=central.tfplan
+terraform apply central.tfplan
+terraform output -raw central_log_bucket_arn
 ```
 
-### 4 — Deploy spoke account resources
+`log_sources` is both an allowlist and a schema input. Include every spoke
+account/Region before creating its Flow Logs. A change updates S3 delivery and
+projected partition values.
+
+Object Lock is disabled by default. Enabling it is an irreversible bucket
+property; COMPLIANCE retention can prevent even the account owner from deleting
+objects. Test governance, recovery, and cost implications first.
+
+If `alert_email` is set, confirm the SNS subscription email before testing.
+
+### 2. One spoke account and Region
 
 ```bash
-# Repeat per spoke account
-export AWS_PROFILE=spoke-account-1
+cd deployments/spoke
+cp ../../examples/spoke/terraform.tfvars.example terraform.tfvars
+# Edit account, Region, role ARN, VPC IDs, and central bucket ARN.
 
-terraform workspace new spoke-444455556666
-terraform plan -target=module.spoke_account["444455556666"]
-terraform apply -target=module.spoke_account["444455556666"]
+# Use a unique backend key for this account and Region.
+cp backend.tf.example backend.tf
+
+export AWS_PROFILE=organization-deployer
+terraform init
+terraform plan -out=spoke.tfplan
+terraform apply spoke.tfplan
 ```
 
-### 5 — Deploy detection engine
+Repeat with a distinct backend key for each account/Region. Do not use CLI
+workspaces or `-target` to simulate account boundaries. The provider assumes
+`deployment_role_arn` and refuses to operate in another account.
+
+Flow Logs delivery to S3 is best effort and usually delayed several minutes.
+The default 15-minute query delay avoids scanning the newest incomplete period.
+
+## Validate locally
 
 ```bash
-export AWS_PROFILE=central-account
+terraform fmt -check -recursive
+terraform init -backend=false
+terraform validate
+terraform test
+terraform -chdir=deployments/spoke init -backend=false
+terraform -chdir=deployments/spoke validate
+terraform -chdir=deployments/spoke test
 
-terraform plan -target=module.detection_engine
-terraform apply -target=module.detection_engine
+tflint --init
+tflint --recursive
+
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+.venv/bin/python -m flake8 lambda
 ```
 
----
+CI runs these checks plus tfsec and Checkov without AWS credentials. Provider
+lock files are committed for both roots.
 
-## 🔍 Sample Athena Queries
+## Detector behavior
 
-### Top Talkers (last 24h)
+For an EventBridge event at time `T`:
 
-```sql
-SELECT
-  instance_id,
-  srcaddr,
-  dstaddr,
-  SUM(bytes) AS total_bytes,
-  SUM(bytes) / 1073741824.0 AS total_gb
-FROM vpc_flow_logs.flow_logs
-WHERE year  = '2026'
-  AND month = '05'
-  AND day   = '15'
-  AND action = 'ACCEPT'
-GROUP BY instance_id, srcaddr, dstaddr
-ORDER BY total_bytes DESC
-LIMIT 50;
+```text
+window_end   = T - data_delay_minutes
+window_start = window_end - detection_window_minutes
 ```
 
-### Potential Exfiltration Detection
+The SQL enumerates every hourly partition touched and filters record
+`"start"`/`"end"` epochs. It keeps `ACCEPT`, `egress`, `OK` records; prefers
+packet addresses; removes private, loopback, link-local, carrier-grade NAT, and
+multicast destinations plus operator exclusions; and applies the threshold
+after aggregating every destination for each source.
 
-```sql
-SELECT
-  account_id,
-  instance_id,
-  srcaddr,
-  dstaddr,
-  SUM(bytes) AS total_bytes
-FROM vpc_flow_logs.flow_logs
-WHERE year  = '2026'
-  AND month = '05'
-  AND dstaddr NOT LIKE '10.%'
-  AND dstaddr NOT LIKE '172.16.%'
-  AND dstaddr NOT LIKE '192.168.%'
-  AND action = 'ACCEPT'
-GROUP BY account_id, instance_id, srcaddr, dstaddr
-HAVING SUM(bytes) > 53687091200  -- 50 GB
-ORDER BY total_bytes DESC;
-```
+EventBridge retries retain the event timestamp. A hash of the window is stored
+in DynamoDB only after query and alert success, so completed retries are
+skipped. A crash after SNS accepts a message but before the DynamoDB write can
+still duplicate an alert; consumers should deduplicate on the window.
 
----
+## Operations and investigation
 
-## 🚨 Alert Format
+- [Architecture](docs/architecture.md)
+- [Security controls](docs/security-controls.md)
+- [Threat model](docs/threat-model.md)
+- [Operational runbook](docs/runbook.md)
+- [Demo and evidence guide](docs/demo.md)
+- [Cost model](docs/cost-model.md)
+- [Upgrade notes](docs/migration-v2.md)
+- [GitHub repository settings](docs/repository-settings.md)
+- [Athena query templates](athena/queries/)
 
-When a threshold is exceeded, an SNS notification is sent with the following payload:
+The detector never changes network policy or isolates a workload.
 
-```json
-{
-  "alert_type": "POTENTIAL_DATA_EXFILTRATION",
-  "severity": "HIGH",
-  "account_id": "444455556666",
-  "instance_id": "i-0abc123def456789",
-  "source_ip": "10.0.1.42",
-  "destination_ip": "203.0.113.99",
-  "total_bytes": 75161927680,
-  "total_gb": 70.0,
-  "threshold_gb": 50.0,
-  "detection_window": "last_1_hour",
-  "timestamp": "2026-05-15T14:30:00Z",
-  "athena_query_id": "abc12345-def6-7890-ghij-klmnopqrstuv"
-}
-```
+## Cost and retention
 
----
+The largest cost drivers are normally vended-log delivery, retained S3 data,
+Athena bytes scanned, and KMS requests. Volume and Region matter more than
+resource count. Use [Cost model](docs/cost-model.md) with current
+[VPC Flow Logs pricing](https://aws.amazon.com/cloudwatch/pricing/),
+[S3 pricing](https://aws.amazon.com/s3/pricing/), and
+[Athena pricing](https://aws.amazon.com/athena/pricing/); do not rely on a
+static monthly estimate.
 
-## 🔐 Security Controls
+Destroy spoke Flow Logs before central storage. Central buckets use
+`force_destroy = false`. Object-locked objects cannot be removed before
+retention permits it.
 
-| Control | Implementation |
-|---|---|
-| **Encryption at rest** | KMS CMK on S3 bucket and Athena results |
-| **Encryption in transit** | `aws:SecureTransport` S3 bucket policy condition |
-| **Least privilege IAM** | Scoped delivery roles per spoke account |
-| **Log immutability** | S3 Object Lock in COMPLIANCE mode |
-| **Access logging** | S3 server access logs on central bucket |
-| **Bucket versioning** | Enabled on central log bucket |
-| **Block public access** | All four settings enabled on central bucket |
-| **Athena workgroup** | Enforces result encryption and query result location |
+## Project status
 
----
+This reference implements deterministic threshold detection. Organization
+event-driven onboarding, behavioral baselines, SIEM subscribers, and controlled
+integration tests are future extensions, not current capabilities.
 
-## 💰 Cost Estimation
-
-> Costs vary by log volume. Estimates below assume **100 GB/month** of flow log data across 10 VPCs.
-
-| Service | Estimated Monthly Cost |
-|---|---|
-| S3 Storage (100 GB) | ~$2.30 |
-| S3 PUT requests | ~$0.50 |
-| Athena (10 TB scanned — with partitioning ~50 GB effective) | ~$0.25 |
-| Glue Crawler (1 DPU-hour/day) | ~$4.40 |
-| Lambda (hourly, 128 MB, 30s avg) | ~$0.18 |
-| SNS | ~$0.01 |
-| **Total** | **~$7.64/month** |
-
-> **Tip:** Enable [Athena Partition Projection](https://docs.aws.amazon.com/athena/latest/ug/partition-projection.html) to eliminate Glue Crawler costs entirely.
-
----
-
-## 🗺️ Roadmap
-
-- [ ] Athena Partition Projection migration (eliminate Glue Crawler)
-- [ ] QuickSight dashboard for traffic visualization
-- [ ] AWS Organizations integration for auto-onboarding new accounts
-- [ ] ML-based anomaly detection via Amazon SageMaker
-- [ ] SIEM integration (Splunk, Datadog, OpenSearch)
-- [ ] Slack / PagerDuty alerting channels
-
----
-
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome!
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-## 👤 Author
-
-This Repo and project have been prepared by Emir Ozturk.
-
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the
+[MIT License](LICENSE). Maintainer:
+[Emir Ozturk](https://github.com/iamemirozturk).

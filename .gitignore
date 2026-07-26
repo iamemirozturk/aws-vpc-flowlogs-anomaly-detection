@@ -1,11 +1,12 @@
 # Terraform
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan
 *.tfvars
 !*.tfvars.example
+backend.tf
+!backend.tf.example
 crash.log
 override.tf
 override.tf.json
@@ -16,6 +17,7 @@ override.tf.json
 lambda/*.zip
 lambda/__pycache__/
 lambda/.pytest_cache/
+.pytest_cache/
 lambda/tests/__pycache__/
 
 # Python
@@ -26,6 +28,8 @@ __pycache__/
 venv/
 dist/
 *.egg
+.coverage
+*.sarif
 
 # OS
 .DS_Store

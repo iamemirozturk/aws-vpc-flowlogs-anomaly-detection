@@ -1,74 +1,36 @@
-# Contributing to aws-vpc-flowlogs-anomaly-detection
+# Contributing
 
-Thank you for your interest in contributing! This project is maintained as a reference implementation for AWS security practitioners. All contributions are welcome.
-
----
-
-## Getting Started
-
-1. **Fork** the repository and clone your fork locally.
-2. Create a **feature branch**: `git checkout -b feat/your-feature-name`
-3. Make your changes following the guidelines below.
-4. **Test** your Terraform changes: `terraform init -backend=false && terraform validate && terraform fmt -check -recursive`
-5. Open a **Pull Request** against `main` with a clear description.
-
----
-
-## Development Setup
+1. Fork and create a focused branch.
+2. Never commit credentials, state, account identifiers, topology, Flow Log
+   records, query results, or email addresses.
+3. Keep central and spoke state boundaries intact.
+4. Update tests and documentation with behavior changes.
+5. Run:
 
 ```bash
-# Install tools
-brew install terraform tfsec checkov
-
-# Install pre-commit hooks
-pip install pre-commit
-pre-commit install
-
-# Validate all modules
+terraform fmt -check -recursive
 terraform init -backend=false
 terraform validate
-terraform fmt -recursive
-tfsec .
-checkov -d . --framework terraform
+terraform test
+terraform -chdir=deployments/spoke init -backend=false
+terraform -chdir=deployments/spoke validate
+terraform -chdir=deployments/spoke test
+tflint --init && tflint --recursive
+.venv/bin/python -m pytest
+.venv/bin/python -m flake8 lambda
 ```
 
----
+Constrain providers, commit lock files, validate sensitive inputs, scope IAM,
+and explain scanner suppressions. Flag state moves, replacements, retention,
+and cost changes. Do not use `-target` as a deployment workflow.
 
-## Contribution Guidelines
+Keep AWS clients mockable, test time/failure boundaries, do not swallow
+notification failures, and bound query/alert output. Athena queries require
+partition and epoch filters; quote `"start"` and `"end"`.
 
-### Terraform
-- All resources must have `tags` applied via the `local.common_tags` pattern.
-- No hard-coded account IDs, bucket names, or ARNs — use variables.
-- All variables must include `description` and `validation` blocks where applicable.
-- Run `terraform fmt -recursive` before committing.
+Distinguish implementation from prerequisites and roadmap. Do not claim
+compliance or savings without evidence. Update the SVG and architecture text
+together.
 
-### Lambda (Python)
-- Target Python 3.12.
-- Follow PEP 8. Use type hints.
-- All functions must have docstrings.
-- Unit test new logic in `lambda/tests/`.
-
-### SQL Queries
-- Use `{{placeholder}}` syntax for parameterized values.
-- Always include partition filters (`year`, `month`, `day`) to prevent full scans.
-- Add a comment block at the top of each file explaining purpose and usage.
-
-### Documentation
-- Update `README.md` if you add a new module, feature, or query.
-- Add architectural changes to `docs/architecture.md` and update `docs/architecture.drawio`.
-
----
-
-## Reporting Issues
-
-Please use [GitHub Issues](../../issues) and include:
-- Terraform version (`terraform version`)
-- AWS provider version
-- Error message and stack trace
-- Minimal reproduction steps
-
----
-
-## Code of Conduct
-
-Be kind, constructive, and professional. We follow the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+Report vulnerabilities through [SECURITY.md](SECURITY.md). See
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
