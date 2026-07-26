@@ -48,7 +48,7 @@ jobs:
           terraform test -no-color
 
       - name: Set up TFLint
-        uses: terraform-linters/setup-tflint@ae78205cfffec9e8d93fd2b3115c7e9d3166d4b6 # v5
+        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
 
       - name: Run TFLint
         run: |
